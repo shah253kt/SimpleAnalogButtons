@@ -1,12 +1,12 @@
 #include "SimpleAnalogButtons.h"
 
 #if defined(ARDUINO_STM_NUCLEO_F103RB) || defined(ARDUINO_GENERIC_STM32F103C)
-SimpleAnalogButtons::SimpleAnalogButtons(uint8_t pin, WiringPinMode mode, uint16_t minValidValue, uint16_t samplingInterval)
+SimpleAnalogButtons::SimpleAnalogButtons(uint8_t pin, WiringPinMode mode, uint16_t samplingInterval)
 #else
-SimpleAnalogButtons::SimpleAnalogButtons(uint8_t pin, uint8_t mode, uint16_t minValidValue, uint16_t samplingInterval)
+SimpleAnalogButtons::SimpleAnalogButtons(uint8_t pin, uint8_t mode, uint16_t samplingInterval)
 #endif
     : mPin(pin),
-      mMinValidValue(minValidValue),
+      mMinValidValue(ANALOG_BUTTON_DEFAULT_MIN_VALID_VALUE),
       mSamplingInterval(samplingInterval),
       mButtonCount(0),
       mSampleCount(0),
@@ -25,9 +25,18 @@ SimpleAnalogButtons::~SimpleAnalogButtons()
     delete[] buttonRange;
 }
 
-void SimpleAnalogButtons::addButton(uint16_t minMean, uint16_t maxMean)
+bool SimpleAnalogButtons::addButton(uint16_t minMean, uint16_t maxMean)
 {
+    if (mButtonCount >= ANALOG_BUTTON_MAX_COUNT || minMean > maxMean)
+        return false;
+
+    uint16_t minValidValue = minMean - ((maxMean - minMean) / 2);
     buttonRange[mButtonCount++].setRange(minMean, maxMean);
+
+    if (minValidValue < mMinValidValue)
+        mMinValidValue = minValidValue;
+
+    return true;
 }
 
 void SimpleAnalogButtons::setSamplingInterval(uint16_t samplingInterval)
@@ -48,6 +57,11 @@ void SimpleAnalogButtons::setHeldCallbackFunction(void (*func)(uint8_t))
 void SimpleAnalogButtons::setHoldDuration(uint16_t duration)
 {
     mHoldDuration = duration;
+}
+
+void SimpleAnalogButtons::setMinValidValue(uint16_t minValidValue)
+{
+    mMinValidValue = minValidValue;
 }
 
 uint16_t SimpleAnalogButtons::readRaw()
@@ -88,24 +102,36 @@ void SimpleAnalogButtons::update()
 
     for (uint8_t i = 0; i < mButtonCount; i++)
     {
-        if (buttonRange[i].inRange(meanValue))
+        if (!buttonRange[i].inRange(meanValue))
         {
-            if (i != mIndexOfLastButtonPressed && mPressedCallbackFunction)
-            {
-                mIndexOfLastButtonPressed = i;
-                (*mPressedCallbackFunction)(i);
-            }
-
-            if (i != mIndexOfLastButtonHeld && millis() - mStartPollAt >= mHoldDuration && mHeldCallbackFunction)
-            {
-                mIndexOfLastButtonHeld = i;
-                (*mHeldCallbackFunction)(i);
-            }
-
-            return;
+            continue;
         }
+
+        if (i != mIndexOfLastButtonPressed && mPressedCallbackFunction)
+        {
+            mIndexOfLastButtonPressed = i;
+            (*mPressedCallbackFunction)(i);
+        }
+
+        if (i != mIndexOfLastButtonHeld && millis() - mStartPollAt >= mHoldDuration && mHeldCallbackFunction)
+        {
+            mIndexOfLastButtonHeld = i;
+            (*mHeldCallbackFunction)(i);
+        }
+
+        return;
     }
 
     mIndexOfLastButtonPressed = -1;
     mIndexOfLastButtonHeld = -1;
+}
+
+int SimpleAnalogButtons::getPressed()
+{
+    return mIndexOfLastButtonPressed;
+}
+
+int SimpleAnalogButtons::getHeld()
+{
+    return mIndexOfLastButtonHeld;
 }
